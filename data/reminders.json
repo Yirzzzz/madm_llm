@@ -1,0 +1,12 @@
+[
+  {
+    "reminder_id": "rem_0001",
+    "task": "take medicine",
+    "scheduled_time": "tomorrow 4pm",
+    "time_text": "tomorrow 4pm",
+    "target": "self",
+    "status": "active",
+    "created_at": "2026-05-11T20:31:21+08:00",
+    "updated_at": "2026-05-11T20:31:21+08:00"
+  }
+]
