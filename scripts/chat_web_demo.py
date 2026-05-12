@@ -97,6 +97,12 @@ async function run(){
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({session_id:sid,message:text})});
     const data=await res.json();
+    if(data.first_model_output){
+      add('[first_model_output]\\n'+data.first_model_output,'t');
+    }
+    if(data.tool_result){
+      add('[tool_result]\\n'+data.tool_result,'t');
+    }
     add(data.reply || '(empty)','a');
   }catch(e){
     add('Request failed: '+e,'a');
@@ -131,6 +137,47 @@ def extract_json(text: str) -> dict[str, Any] | None:
     return None
 
 
+def parse_tool_call_output(text: str) -> dict[str, Any] | None:
+    # Format A: OpenAI-style assistant JSON containing tool_calls
+    obj = extract_json(text)
+    if isinstance(obj, dict) and isinstance(obj.get("tool_calls"), list):
+        msg = dict(obj)
+        msg["role"] = "assistant"
+        msg["content"] = None
+        return msg
+
+    # Format B: custom tag
+    # <tool_call>{"name":"query_reminder","arguments":{...}}</tool_call>
+    m = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, flags=re.S)
+    if not m:
+        return None
+    try:
+        call = json.loads(m.group(1))
+    except Exception:
+        return None
+    if not isinstance(call, dict):
+        return None
+    name = call.get("name")
+    arguments = call.get("arguments", {})
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if isinstance(arguments, str):
+        args_text = arguments
+    else:
+        args_text = json.dumps(arguments, ensure_ascii=False)
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": f"call_{uuid.uuid4().hex[:12]}",
+                "type": "function",
+                "function": {"name": name.strip(), "arguments": args_text},
+            }
+        ],
+    }
+
+
 class HFAssistant:
     def __init__(self, model_path: str, adapter_path: str | None = None, max_new_tokens: int = 384) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
@@ -161,13 +208,11 @@ class HFAssistant:
             out = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False)
         txt = self.tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
         logger.info("model_called prompt_tokens=%s output_chars=%s", inputs["input_ids"].shape[1], len(txt))
+        tc_msg = parse_tool_call_output(txt)
+        if tc_msg:
+            tc_msg["_raw_preview"] = txt[:500]
+            return tc_msg
         obj = extract_json(txt)
-        if obj and obj.get("tool_calls"):
-            role = obj.get("role", "assistant")
-            obj["content"] = None
-            obj["role"] = role
-            obj["_raw_preview"] = txt[:500]
-            return obj
         if not obj:
             return {"role": "assistant", "content": txt, "_raw_preview": txt[:500]}
         content = obj.get("content")
@@ -179,6 +224,16 @@ class HFAssistant:
 class RequestBody(BaseModel):
     session_id: str
     message: str
+
+
+def assistant_text(msg: dict[str, Any]) -> str:
+    content = msg.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    raw = msg.get("_raw_preview")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return "[empty model output]"
 
 
 def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> FastAPI:
@@ -199,24 +254,36 @@ def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> F
         history = sessions.get(req.session_id, [])
         tools = get_tools()
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": req.message}]
-        trace_lines: list[str] = []
+        first_model_output = ""
+        tool_result = ""
 
         for _ in range(3):
             assistant = model_callable(messages, tools)
-            if assistant.get("_raw_preview"):
-                trace_lines.append("assistant.raw_preview:\n" + str(assistant["_raw_preview"]))
+            if not first_model_output:
+                first_model_output = str(assistant.get("_raw_preview") or assistant.get("content") or "")
             messages.append(assistant)
             if not assistant.get("tool_calls"):
                 sessions[req.session_id] = messages[1:]
-                return JSONResponse({"reply": assistant.get("content", "")})
-            trace_lines.append("assistant.tool_calls:\n" + json.dumps(assistant["tool_calls"], ensure_ascii=False, indent=2))
+                return JSONResponse(
+                    {
+                        "reply": assistant_text(assistant),
+                        "first_model_output": first_model_output,
+                        "tool_result": tool_result,
+                    }
+                )
             tool_msgs = executor.execute_tool_calls(assistant)
             for t in tool_msgs:
-                trace_lines.append("tool.result:\n" + t["content"])
+                tool_result = t["content"]
             messages.extend(tool_msgs)
 
         sessions[req.session_id] = messages[1:]
-        return JSONResponse({"reply": "Stopped at max tool rounds."})
+        return JSONResponse(
+            {
+                "reply": "Stopped at max tool rounds.",
+                "first_model_output": first_model_output,
+                "tool_result": tool_result,
+            }
+        )
 
     return app
 
