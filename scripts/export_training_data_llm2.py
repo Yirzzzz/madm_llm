@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.reminder_service import ReminderService
+from app.storage import JSONReminderStorage
+from app.tool_executor import ToolExecutor
 from app.tool_registry import get_tools
 
 
@@ -469,6 +473,86 @@ def normalize_sample(sample: dict[str, Any], tools: list[dict[str, Any]], scenar
     return sample
 
 
+def _build_local_executor() -> ToolExecutor:
+    tmp_dir = ROOT / "data" / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    storage_path = tmp_dir / f"llm2_exec_{uuid.uuid4().hex}.json"
+    storage_path.write_text("[]", encoding="utf-8")
+    storage = JSONReminderStorage(storage_path)
+    service = ReminderService(storage)
+    return ToolExecutor(service)
+
+
+def _preseed_for_scenario(executor: ToolExecutor, scenario: str, tool_name: str, args: dict[str, Any]) -> None:
+    service = executor.reminder_service
+    if scenario in {"query_success", "query_vague_memory"} and tool_name == "query_reminder":
+        service.create_reminder(time_text=args.get("time_text") or "tomorrow morning", task=args.get("task") or "take medicine", target="self")
+        return
+    if scenario == "update_success" and tool_name == "update_reminder":
+        service.create_reminder(time_text=args.get("time_text") or "tomorrow morning", task=args.get("task") or "walk", target="self")
+        return
+    if scenario == "delete_success" and tool_name == "delete_reminder":
+        service.create_reminder(time_text=args.get("time_text") or "tomorrow morning", task=args.get("task") or "walk", target="self")
+        return
+    if scenario == "update_ambiguous" and tool_name == "update_reminder":
+        tt = args.get("time_text") or "tomorrow morning"
+        tk = args.get("task") or "walk"
+        service.create_reminder(time_text=tt, task=tk, target="self")
+        service.create_reminder(time_text=tt, task=tk, target="self")
+        return
+    if scenario == "delete_ambiguous" and tool_name == "delete_reminder":
+        tt = args.get("time_text") or "tomorrow morning"
+        tk = args.get("task") or "walk"
+        service.create_reminder(time_text=tt, task=tk, target="self")
+        service.create_reminder(time_text=tt, task=tk, target="self")
+        return
+
+
+def inject_local_tool_result(sample: dict[str, Any], scenario: str) -> dict[str, Any]:
+    if scenario.startswith("no_tool"):
+        return sample
+
+    messages = sample.get("messages", [])
+    if not isinstance(messages, list):
+        raise ValueError("sample.messages must be list")
+
+    assistant_idx = None
+    assistant_msg = None
+    for i, msg in enumerate(messages):
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assistant_idx = i
+            assistant_msg = msg
+            break
+    if assistant_idx is None or not isinstance(assistant_msg, dict):
+        raise ValueError("tool scenario missing assistant tool_calls message")
+
+    tool_calls = assistant_msg.get("tool_calls")
+    if not isinstance(tool_calls, list) or not tool_calls:
+        raise ValueError("assistant tool_calls must be non-empty list")
+    tool_call = tool_calls[0]
+    fn = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+    tool_name = fn.get("name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("tool_call.function.name missing")
+    args_raw = fn.get("arguments", "{}")
+    args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
+    if not isinstance(args, dict):
+        raise ValueError("tool args must be object")
+
+    executor = _build_local_executor()
+    _preseed_for_scenario(executor, scenario=scenario, tool_name=tool_name, args=args)
+    tool_msg = executor.execute_tool_call(tool_call if isinstance(tool_call, dict) else {})
+
+    # Replace the first immediate tool message after assistant.tool_calls; insert if absent.
+    if assistant_idx + 1 < len(messages) and isinstance(messages[assistant_idx + 1], dict) and messages[assistant_idx + 1].get("role") == "tool":
+        messages[assistant_idx + 1] = tool_msg
+    else:
+        messages.insert(assistant_idx + 1, tool_msg)
+
+    sample["messages"] = messages
+    return sample
+
+
 def validate_sample(sample: dict[str, Any], scenario: str) -> None:
     messages = sample["messages"]
 
@@ -578,6 +662,7 @@ def generate_sample(
             last_text = text
             sample = extract_json_object(text)
             sample = normalize_sample(sample, tools=tools, scenario=scenario)
+            sample = inject_local_tool_result(sample, scenario=scenario)
             validate_sample(sample, scenario=scenario)
             return sample
         except Exception as exc:

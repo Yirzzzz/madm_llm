@@ -2,7 +2,7 @@ model:
   name_or_path: "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct"
 
 data:
-  train_file: "data/training_data_llm_onlytool.jsonl"
+  train_file: "data/training_data_merged.cleaned.jsonl"
 #  train_file: "data/training_data_llm.cleaned.jsonl"
   eval_file: null
   system_key: "messages"
