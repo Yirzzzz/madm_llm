@@ -1,72 +1,42 @@
 [
   {
     "reminder_id": "rem_0001",
-    "task": "打乒乓球",
-    "scheduled_time": "明天早上",
-    "time_text": "明天早上",
+    "task": "play basketball",
+    "scheduled_time": "2026-05-15T16:00:48+08:00",
+    "time_text": "tomorrow at 4:00pm",
     "target": "self",
     "status": "active",
-    "created_at": "2026-05-13T07:33:03+08:00",
-    "updated_at": "2026-05-13T07:33:03+08:00"
+    "created_at": "2026-05-14T16:56:48+08:00",
+    "updated_at": "2026-05-14T16:56:48+08:00"
   },
   {
     "reminder_id": "rem_0002",
-    "task": "带衣服",
-    "scheduled_time": "明天早上打乒乓球",
-    "time_text": "明天早上打乒乓球",
+    "task": "play basketball",
+    "scheduled_time": "2026-05-15T20:00:59+08:00",
+    "time_text": "tomorrow at 8:00pm",
     "target": "self",
     "status": "active",
-    "created_at": "2026-05-13T07:35:07+08:00",
-    "updated_at": "2026-05-13T07:35:07+08:00"
+    "created_at": "2026-05-14T17:16:59+08:00",
+    "updated_at": "2026-05-14T17:16:59+08:00"
   },
   {
     "reminder_id": "rem_0003",
-    "task": "打篮球",
-    "scheduled_time": "明天早上八点打篮球",
-    "time_text": "明天早上八点打篮球",
+    "task": "play piano",
+    "scheduled_time": "2026-05-14T20:00:40+08:00",
+    "time_text": "today at 8:00pm",
     "target": "self",
     "status": "active",
-    "created_at": "2026-05-13T07:37:41+08:00",
-    "updated_at": "2026-05-13T07:37:41+08:00"
+    "created_at": "2026-05-14T17:17:40+08:00",
+    "updated_at": "2026-05-14T17:17:40+08:00"
   },
   {
     "reminder_id": "rem_0004",
-    "task": "开组会",
-    "scheduled_time": "明天早八点",
-    "time_text": "明天早八点",
-    "target": "self",
-    "status": "active",
-    "created_at": "2026-05-14T09:54:23+08:00",
-    "updated_at": "2026-05-14T09:54:23+08:00"
-  },
-  {
-    "reminder_id": "rem_0005",
-    "task": "play baseetball",
-    "scheduled_time": "tomorrow at 4:00 pm",
-    "time_text": "tomorrow at 4:00 pm",
-    "target": "self",
-    "status": "active",
-    "created_at": "2026-05-14T12:20:16+08:00",
-    "updated_at": "2026-05-14T12:20:16+08:00"
-  },
-  {
-    "reminder_id": "rem_0006",
     "task": "play basketball",
-    "scheduled_time": "tomorrow at 4:00pm",
-    "time_text": "tomorrow at 4:00pm",
+    "scheduled_time": "2026-05-15T05:00:09+08:00",
+    "time_text": "tomorrow at 5:00am",
     "target": "self",
     "status": "active",
-    "created_at": "2026-05-14T15:03:28+08:00",
-    "updated_at": "2026-05-14T15:03:28+08:00"
-  },
-  {
-    "reminder_id": "rem_0007",
-    "task": "play basketball",
-    "scheduled_time": "tomorrow at 4:00pm",
-    "time_text": "tomorrow at 4:00pm",
-    "target": "self",
-    "status": "active",
-    "created_at": "2026-05-14T15:04:44+08:00",
-    "updated_at": "2026-05-14T15:04:44+08:00"
+    "created_at": "2026-05-14T17:35:09+08:00",
+    "updated_at": "2026-05-14T17:35:09+08:00"
   }
 ]

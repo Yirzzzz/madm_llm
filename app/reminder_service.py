@@ -1,6 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import re
+from datetime import datetime, timedelta
 from typing import Any
+
+from dateutil import parser as dt_parser
 
 from app.models import Reminder, ServiceResult, now_iso
 from app.storage import JSONReminderStorage
@@ -28,6 +32,40 @@ class ReminderService:
         payload["state"] = "success" if status == "success" else False
         return payload
 
+    def _parse_time_text(self, time_text: str) -> str | None:
+        text = time_text.strip()
+        if not text:
+            return None
+
+        now = datetime.now().astimezone()
+        low = text.lower()
+        day_offset = 0
+        if "tomorrow" in low:
+            day_offset = 1
+            low = low.replace("tomorrow", " ").strip()
+        elif "today" in low:
+            low = low.replace("today", " ").strip()
+
+        low = low.replace("tonight", " ").strip()
+        low = re.sub(r"\s+", " ", low).strip()
+
+        if day_offset:
+            base = now + timedelta(days=day_offset)
+            if low:
+                try:
+                    parsed = dt_parser.parse(low, fuzzy=True, default=base)
+                except (ValueError, TypeError):
+                    return None
+            else:
+                parsed = base.replace(hour=21, minute=0, second=0, microsecond=0)
+            return parsed.astimezone().isoformat(timespec="seconds")
+
+        try:
+            parsed = dt_parser.parse(text, fuzzy=True, default=now)
+        except (ValueError, TypeError):
+            return None
+        return parsed.astimezone().isoformat(timespec="seconds")
+
     def create_reminder(self, time_text: str | None, task: str | None, target: str = "self") -> dict[str, Any]:
         missing = []
         if not time_text:
@@ -43,10 +81,18 @@ class ReminderService:
 
         reminders = self.storage.load()
         ts = now_iso()
+        parsed_time = self._parse_time_text(time_text)
+        if not parsed_time:
+            return self._result(
+                status="missing_fields",
+                missing_fields=["time_text"],
+                message="Unable to parse time_text into a concrete datetime.",
+            )
+
         reminder = Reminder(
             reminder_id=self._next_id(reminders),
             task=task,
-            scheduled_time=time_text,
+            scheduled_time=parsed_time,
             time_text=time_text,
             target="self" if target != "self" else target,
             status="active",
@@ -140,8 +186,15 @@ class ReminderService:
         for r in reminders:
             if r.get("reminder_id") == rid and r.get("status") == "active":
                 if new_time_text:
+                    parsed_time = self._parse_time_text(new_time_text)
+                    if not parsed_time:
+                        return self._result(
+                            status="missing_fields",
+                            missing_fields=["new_time_text"],
+                            message="Unable to parse new_time_text into a concrete datetime.",
+                        )
                     r["time_text"] = new_time_text
-                    r["scheduled_time"] = new_time_text
+                    r["scheduled_time"] = parsed_time
                 if new_task:
                     r["task"] = new_task
                 r["updated_at"] = now_iso()

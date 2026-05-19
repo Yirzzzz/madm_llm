@@ -236,7 +236,7 @@ def assistant_text(msg: dict[str, Any]) -> str:
     return "[empty model output]"
 
 
-def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> FastAPI:
+def build_app(model_path: str, adapter_path: str | None, storage_path: str, stateless: bool = False) -> FastAPI:
     app = FastAPI()
     storage = JSONReminderStorage(storage_path)
     service = ReminderService(storage)
@@ -251,7 +251,7 @@ def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> F
     @app.post("/api/chat")
     def chat(req: RequestBody) -> JSONResponse:
         logger.info("chat request session_id=%s user=%s", req.session_id, req.message)
-        history = sessions.get(req.session_id, [])
+        history = [] if stateless else sessions.get(req.session_id, [])
         tools = get_tools()
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": req.message}]
         first_model_output = ""
@@ -263,7 +263,8 @@ def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> F
                 first_model_output = str(assistant.get("_raw_preview") or assistant.get("content") or "")
             messages.append(assistant)
             if not assistant.get("tool_calls"):
-                sessions[req.session_id] = messages[1:]
+                if not stateless:
+                    sessions[req.session_id] = messages[1:]
                 return JSONResponse(
                     {
                         "reply": assistant_text(assistant),
@@ -276,7 +277,8 @@ def build_app(model_path: str, adapter_path: str | None, storage_path: str) -> F
                 tool_result = t["content"]
             messages.extend(tool_msgs)
 
-        sessions[req.session_id] = messages[1:]
+        if not stateless:
+            sessions[req.session_id] = messages[1:]
         return JSONResponse(
             {
                 "reply": "Stopped at max tool rounds.",
@@ -293,12 +295,18 @@ def main() -> None:
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--adapter-path", default=None)
     parser.add_argument("--storage-path", default="data/reminders.json")
+    parser.add_argument("--stateless", action="store_true", help="Disable session memory; each request is single-turn.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8008)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    app = build_app(model_path=args.model_path, adapter_path=args.adapter_path, storage_path=args.storage_path)
+    app = build_app(
+        model_path=args.model_path,
+        adapter_path=args.adapter_path,
+        storage_path=args.storage_path,
+        stateless=args.stateless,
+    )
     uvicorn.run(app, host=args.host, port=args.port)
 
 

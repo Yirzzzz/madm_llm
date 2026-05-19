@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+from datetime import datetime
 
 from app.reminder_service import ReminderService
 from app.storage import JSONReminderStorage
@@ -10,10 +12,14 @@ def make_service(tmp_path):
 
 def test_create_reminder_success(tmp_path):
     svc = make_service(tmp_path)
-    result = svc.create_reminder(time_text="tomorrow 8am", task="take medicine")
+    result = svc.create_reminder(time_text="tomorrow at 4:00pm", task="take medicine")
     assert result["status"] == "success"
     assert result["state"] == "success"
     assert result["reminder"]["task"] == "take medicine"
+    assert result["reminder"]["scheduled_time"] != "tomorrow at 4:00pm"
+    parsed = datetime.fromisoformat(result["reminder"]["scheduled_time"])
+    assert parsed.hour == 16
+    assert parsed.minute == 0
 
 
 def test_create_reminder_missing_fields(tmp_path):

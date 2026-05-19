@@ -36,6 +36,9 @@ The report is written to the `output.report_file` configured in YAML.
 ##  4) web
 ```bash
 python scripts/chat_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path "outputs/qwen25_15b_dora/checkpoint-580" 
+python scripts/chat_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path "outputs/qwen25_15b_dora/checkpoint-800" --stateless 
+
+
 ```
 
 mcp baseline:
