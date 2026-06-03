@@ -292,3 +292,47 @@ Validation:
 ```bash
 python -m py_compile scripts/train_adapter.py scripts/eval_tooluse_model.py
 ```
+
+## Update (benchmark prompt generation + isolated eval runner)
+
+Added benchmark-building and evaluation pipeline to support:
+
+1. LLM API-based prompt generation (diverse paraphrases).
+2. Checkpoint-level evaluation against prompt sets.
+3. Per-sample isolated JSON storage initialization and automatic tool-use scoring by storage delta + tool status.
+
+New files:
+
+- `benchmark/seed.md` (English seed scenarios)
+- `benchmark/init_states.jsonl`
+- `app/benchmark_eval.py`
+- `scripts/generate_benchmark_prompts.py`
+- `scripts/run_benchmark_eval.py`
+- `tests/test_benchmark_eval.py`
+
+What was implemented:
+
+- `generate_benchmark_prompts.py`:
+  - reads `benchmark/seed.md`
+  - calls OpenAI-compatible API
+  - writes `benchmark/prompts.jsonl`
+  - keeps scenario metadata (`tool`, `scenario`, `expected_outcome`)
+
+- `run_benchmark_eval.py`:
+  - loads prompts JSONL
+  - initializes isolated `reminders.json` per sample
+  - runs runtime loop with local model checkpoint + optional adapter
+  - captures tool result status and storage before/after
+  - scores:
+    - tool-use success (status + storage delta consistency)
+    - answer-level lexical correctness (lightweight heuristic)
+  - outputs report JSON with summary + per-sample details
+
+Validation:
+
+```bash
+python -m py_compile app/benchmark_eval.py scripts/generate_benchmark_prompts.py scripts/run_benchmark_eval.py
+pytest -q tests/test_benchmark_eval.py
+```
+
+Result: passed (`3 passed`).

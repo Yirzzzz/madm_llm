@@ -227,6 +227,15 @@
       "status": "done",
       "passes": true,
       "verification": "pytest -q tests/test_reminder_notifier.py && python scripts/run_reminder_notifier.py --once"
+    },
+    {
+      "id": "F017",
+      "name": "Add benchmark prompt generation and end-to-end evaluation runner",
+      "description": "Generate diverse benchmark prompts via LLM API and run isolated per-sample tool-use evaluation against local checkpoints with storage delta checks.",
+      "priority": "P1",
+      "status": "done",
+      "passes": true,
+      "verification": "python -m py_compile app/benchmark_eval.py scripts/generate_benchmark_prompts.py scripts/run_benchmark_eval.py && pytest -q tests/test_benchmark_eval.py"
     }
   ],
   "milestones": [

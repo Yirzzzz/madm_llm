@@ -1,14 +1,32 @@
-| tool   | scenario                  | 种子场景                                     | number | expected_outcome   | notes               |
-| ------ | ------------------------- | -------------------------------------------- | ------ | ------------------ | ------------------- |
-| create | create_success            | 提醒我明天早上八点吃药                       | 20     | success            | 时间任务完整        |
-| create | create_missing_time       | 提醒我把剩汤放冰箱                           | 20     | missing_time       | 需追问时间          |
-| create | create_missing_task       | 明天下午三点提醒我一下                       | 20     | missing_task       | 需追问任务          |
-| update | update_success            | 我下午本来是打算五点和老李下棋，帮我改成四点 | 20     | success            | 需预置 reminder     |
-| update | update_not_found          | 帮我把明天的剪头发时间改为六点               | 20     | not_found          | 无对应 reminder     |
-| update | update_missing_target     | 把我明天的提醒更改为6点                      | 20     | missing_target     | 需追问哪条 reminder |
-| query  | query_success             | 我明天几点去打乒乓球                         | 20     | success            | 按任务查时间        |
-| query  | query_success             | 我明天六点有安排吗                           | 20     | success            | 按时间查事件        |
-| query  | query_not_found           | 我明天几点打篮球                             | 20     | not_found          | 无相关 reminder     |
-| delete | delete_success            | 我今晚不去打篮球了，帮我取消一下             | 20     | success            | 明确删除请求        |
-| delete | delete_needs_confirmation | 我明天不打算剪头发了                         | 20     | needs_confirmation | 先确认再删          |
-| delete | delete_not_found          | 我下午不准备去打乒乓球了，帮我取消提醒       | 20     | not_found          | 无对应 reminder     |
+﻿| tool    | scenario                         | seed_utterance                                                                                  | number | expected_outcome | notes                                                      |
+| ------- | -------------------------------- | ----------------------------------------------------------------------------------------------- | ------ | ---------------- | ---------------------------------------------------------- |
+| create  | create_success_medicine          | Remind me tomorrow at 8:00 AM to take my blood pressure medicine.                              | 16     | success          | direct create, clear time + task                           |
+| create  | create_success_call_family       | Please remind me this evening at 7 to call my daughter.                                        | 16     | success          | family-call phrasing                                       |
+| create  | create_success_utility_bill      | Set a reminder for Friday night to pay the electricity bill.                                   | 12     | success          | utility task                                                |
+| create  | create_success_short_command     | Tomorrow 6 pm, remind me to bring in the laundry.                                              | 12     | success          | compressed command style                                    |
+| create  | create_missing_time              | Remind me to put the leftover soup in the fridge.                                              | 12     | missing_fields   | missing time_text                                           |
+| create  | create_missing_task              | Remind me tomorrow at 3:00 PM.                                                                 | 12     | missing_fields   | missing task                                                |
+| create  | create_missing_both              | I need a reminder.                                                                              | 8      | missing_fields   | missing both required fields                                |
+| query   | query_by_task_success            | What time is my basketball reminder tomorrow?                                                   | 14     | success          | query by task                                               |
+| query   | query_by_time_success            | What do I have scheduled tomorrow at 6 PM?                                                     | 14     | success          | query by time                                               |
+| query   | query_vague_memory_success       | I forgot what I need to do tomorrow, can you check my reminders?                               | 14     | success          | fuzzy memory scenario                                       |
+| query   | query_polite_elder_style         | Could you help me check whether I have any reminder for tomorrow morning?                      | 10     | success          | polite elder style                                          |
+| query   | query_not_found_tennis           | What time is my tennis reminder tomorrow?                                                      | 12     | not_found        | unmatched task                                              |
+| query   | query_not_found_doctor           | Do I have a reminder for a dentist visit this afternoon?                                       | 10     | not_found        | unmatched appointment                                       |
+| update  | update_success_time_shift        | I planned to meet Li at 5 PM this afternoon, change it to 4 PM.                               | 14     | success          | update time                                                 |
+| update  | update_success_task_change       | Change my reminder tomorrow at 8 AM from walking to blood sugar check.                         | 12     | success          | update task                                                 |
+| update  | update_ambiguous_generic         | Change my reminder tomorrow to 6 PM.                                                           | 12     | ambiguous        | ambiguous locator                                           |
+| update  | update_ambiguous_same_task       | Move my medicine reminder to tonight.                                                          | 10     | ambiguous        | likely multiple medicine reminders                          |
+| update  | update_not_found_haircut         | Change my haircut reminder tomorrow to 6 PM.                                                   | 10     | not_found        | no matching reminder                                        |
+| update  | update_missing_target            | Please update my reminder to 6 PM.                                                             | 10     | missing_fields   | missing locator fields                                      |
+| delete  | delete_success_explicit          | I will not play basketball tonight, cancel that reminder.                                      | 14     | success          | explicit cancellation                                       |
+| delete  | delete_success_polite            | Please remove my reminder for tomorrow evening to call my son.                                 | 12     | success          | polite delete                                               |
+| delete  | delete_ambiguous_generic         | Cancel my reminder tomorrow.                                                                   | 12     | ambiguous        | ambiguous delete                                            |
+| delete  | delete_ambiguous_task_only       | Delete my medicine reminder.                                                                   | 10     | ambiguous        | task-only may map to multiple                               |
+| delete  | delete_not_found_tennis          | I am not going to play tennis this afternoon, cancel that reminder.                            | 10     | not_found        | no matching reminder                                        |
+| delete  | delete_missing_target            | Please delete one reminder for me.                                                             | 10     | missing_fields   | missing locator fields                                      |
+| no_tool | no_tool_daily_chat               | The weather is nice today, I just went for a walk in the park.                                | 10     | no_tool          | casual chat                                                 |
+| no_tool | no_tool_emotional_support        | I feel a bit lonely tonight and want someone to talk to.                                       | 10     | no_tool          | emotional support, no reminder intent                       |
+| no_tool | no_tool_happy_share              | My grandson visited me today, I am really happy.                                               | 8      | no_tool          | positive sharing                                             |
+| no_tool | no_tool_time_words_no_intent     | Tomorrow afternoon I might drink tea with friends, just saying.                                | 10     | no_tool          | contains time words but no reminder request                 |
+| no_tool | no_tool_question_general         | Do you think walking every day is good for blood pressure?                                     | 8      | no_tool          | general health chat                                         |

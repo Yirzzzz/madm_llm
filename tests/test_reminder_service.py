@@ -47,6 +47,16 @@ def test_query_reminder_success(tmp_path):
     assert len(result["reminders"]) == 1
 
 
+def test_query_reminder_fuzzy_time_match(tmp_path):
+    svc = make_service(tmp_path)
+    created = svc.create_reminder(time_text="tomorrow at 4:00pm", task="play basketball")
+    assert created["status"] == "success"
+    result = svc.query_reminder(time_text="tomorrow", task="play basketball")
+    assert result["status"] == "success"
+    assert result["state"] == "success"
+    assert len(result["reminders"]) == 1
+
+
 def test_update_reminder_ambiguous(tmp_path):
     svc = make_service(tmp_path)
     svc.create_reminder(time_text="8am", task="pill")
@@ -64,6 +74,28 @@ def test_delete_reminder_ambiguous(tmp_path):
     result = svc.delete_reminder(task="pill")
     assert result["status"] == "ambiguous"
     assert result["state"] is False
+
+
+def test_delete_reminder_fuzzy_time_and_task_match(tmp_path):
+    svc = make_service(tmp_path)
+    created = svc.create_reminder(time_text="tomorrow at 4:00pm", task="play basketball")
+    assert created["status"] == "success"
+    result = svc.delete_reminder(time_text="tomorrow", task="playing basketball")
+    assert result["status"] == "success"
+    assert result["state"] == "success"
+    assert result["reminder_id"] == created["reminder_id"]
+
+
+def test_delete_reminder_specific_sport_not_over_broad(tmp_path):
+    svc = make_service(tmp_path)
+    a = svc.create_reminder(time_text="tomorrow at 8:00am", task="play basketball")
+    b = svc.create_reminder(time_text="tomorrow at 9:00am", task="play ping-pong")
+    c = svc.create_reminder(time_text="tomorrow at 10:00am", task="play baseball")
+    assert a["status"] == b["status"] == c["status"] == "success"
+
+    result = svc.delete_reminder(time_text="tomorrow", task="play baseball")
+    assert result["status"] == "success"
+    assert result["reminder_id"] == c["reminder_id"]
 
 
 def test_update_and_delete_success(tmp_path):

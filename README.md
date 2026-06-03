@@ -5,6 +5,21 @@
 - Cleaned dataset: `data/training_data_llm.cleaned.jsonl`
 - Cleaner script: `scripts/clean_training_data_llm.py`
 
+
+python generate_benchmark_prompts_structured.py --seed-md benchmark/seed.md --output benchmark/prompts_structured.jsonl
+python build_tool_eval_cases_from_structured_prompts.py --prompts-jsonl benchmark/prompts_structured.jsonl --output benchmark/tool_eval_cases_structured.jsonl
+python init_tool_eval_dataset_dynamic_time.py --cases-jsonl benchmark/tool_eval_cases_structured.jsonl --out-dir benchmark/eval_runs --with-sqlite --overwrite --now 2026-05-26T09:00:00+08:00
+
+
+python init_tool_eval_dataset_dynamic_time.py --cases-jsonl benchmark/tool_eval_cases_structured.jsonl --out-dir benchmark/eval_runs --with-sqlite --overwrite --now 2026-05-26T09:00:00+08:00
+python scripts/run_tool_eval_from_dataset.py --cases-jsonl benchmark/tool_eval_cases_structured.jsonl --eval-dir benchmark/eval_runs --model-path "..." --adapter-path "..." --report benchmark/reports/qwen_580.json
+
+
+python scripts/clean_training_data_llm.py --input data/training_data2.jsonl --output data/training_data2.cleaned.jsonl --rejects data/training_data2.rejects.jsonl --report data/training_data2.clean_report.json
+
+python scripts/split_jsonl_dataset.py --input data/training_data2.cleaned.jsonl --train-output data/training_data2.train.jsonl --val-output data/training_data2.val.jsonl --val-ratio 0.1 --seed 42 --stratify-by-scenario
+
+
 ```bash
 python scripts/export_training_data_llm.py  --api-env configs/data/api_generation.env --output data/training_data_llm_onlytool.jsonl --n 1000 --endpoint responses
 ```

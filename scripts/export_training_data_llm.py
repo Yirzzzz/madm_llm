@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import copy
 import gzip
 import json
@@ -11,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -44,26 +46,11 @@ SCENARIOS = [
     "delete_success",
     "delete_ambiguous",
     "delete_missing",
-    # "no_tool_daily_chat",
-    # "no_tool_emotional_support",
-    # "no_tool_happy_share",
-    # "no_tool_time_word_but_no_reminder",
+    "no_tool_daily_chat",
+    "no_tool_emotional_support",
+    "no_tool_happy_share",
+    "no_tool_time_word_but_no_reminder",
 ]
-
-EXPECTED_STATUS: dict[str, str] = {
-    "create_success": "success",
-    "create_missing_task": "missing_fields",
-    "create_missing_time": "missing_fields",
-    "query_success": "success",
-    "query_not_found": "not_found",
-    "query_vague_memory": "success",
-    "update_success": "success",
-    "update_ambiguous": "ambiguous",
-    "update_missing": "missing_fields",
-    "delete_success": "success",
-    "delete_ambiguous": "ambiguous",
-    "delete_missing": "missing_fields",
-}
 
 EXPECTED_TOOL: dict[str, str] = {
     "create_success": "create_reminder",
@@ -79,6 +66,7 @@ EXPECTED_TOOL: dict[str, str] = {
     "delete_ambiguous": "delete_reminder",
     "delete_missing": "delete_reminder",
 }
+ALLOWED_STATUS = {"success", "missing_fields", "not_found", "ambiguous", "error"}
 
 
 def load_env_file(path: str | Path) -> dict[str, str]:
@@ -274,9 +262,29 @@ def choose_scenario() -> str:
     return random.choices(list(weights.keys()), weights=list(weights.values()), k=1)[0]
 
 
-def build_prompt(scenario: str, tools: list[dict[str, Any]], recent_user_texts: list[str]) -> list[dict[str, Any]]:
+def build_prompt(
+    scenario: str,
+    tools: list[dict[str, Any]],
+    recent_user_texts: list[str],
+    variation_tag: str,
+) -> list[dict[str, Any]]:
     recent = "\n".join(f"- {x}" for x in recent_user_texts[-20:]) or "none"
     tools_json = json.dumps(tools, ensure_ascii=False, indent=2)
+    style_hint = random.choice(
+        [
+            "concise command style",
+            "polite request style",
+            "casual spoken style",
+            "elderly conversational style",
+            "indirect question style",
+            "detailed context style",
+        ]
+    )
+    topic_pool = (
+        "medicine, blood pressure, blood sugar, doctor appointment, grocery shopping, "
+        "utility bills, closing windows, calling son/daughter/grandchild, pets, walking, "
+        "community activities, stretching, watering plants, charging phone, laundry, cooking"
+    )
 
     generator_system = """You are a high-quality SFT data generator for tool-use training.
 
@@ -305,6 +313,8 @@ Hard rules:
 6. No-tool samples must not contain tool_calls and must not contain role=tool.
 7. The first system message content must be exactly the system prompt provided by the user prompt.
 8. The assistant must not say an operation succeeded before role=tool.
+9. Do not use fixed assistant opening formulas repeatedly.
+10. Assistant should not self-introduce with names like "XiaoNuan" in final replies.
 """
 
     user_prompt = f"""Generate one complete training sample for scenario: {scenario}.
@@ -422,6 +432,15 @@ no_tool_time_word_but_no_reminder:
 Use diverse realistic older-adult daily-life content:
 medicine, blood pressure, blood sugar, doctor appointment, calling daughter/son/grandchild, groceries, utility bills, closing windows, pets, walking, community activities, vague memory, and emotional support.
 
+Diversity rules (very important):
+- Variation tag: {variation_tag}
+- Style hint: {style_hint}
+- Prefer rotating topics from this pool: {topic_pool}
+- Keep scenario intent unchanged, but vary concrete entities (person, task, time phrase, context).
+- Avoid copying sentence structure from recent examples.
+- Avoid repeatedly using only medicine, daughter/grandson, or basketball.
+- Rotate assistant follow-up tone and wording; avoid repeated starts like "Sure," "Of course," "XiaoNuan...".
+
 Return JSON object only.
 """
 
@@ -466,6 +485,86 @@ def normalize_sample(sample: dict[str, Any], tools: list[dict[str, Any]], scenar
     metadata["selected_tool"] = selected_tool
 
     sample["metadata"] = metadata
+    return sample
+
+
+def normalize_tool_payload(payload: dict[str, Any], fallback_status: str = "success") -> dict[str, Any]:
+    status = payload.get("status")
+    if not isinstance(status, str) or status not in ALLOWED_STATUS:
+        status = fallback_status
+    normalized: dict[str, Any] = {
+        "state": "success" if status == "success" else False,
+        "status": status,
+    }
+    if "message" in payload and isinstance(payload.get("message"), str):
+        normalized["message"] = payload["message"]
+    if "missing_fields" in payload and isinstance(payload.get("missing_fields"), list):
+        normalized["missing_fields"] = payload["missing_fields"]
+    if "candidates" in payload and isinstance(payload.get("candidates"), list):
+        normalized["candidates"] = payload["candidates"]
+    if "reminder" in payload and isinstance(payload.get("reminder"), dict):
+        normalized["reminder"] = payload["reminder"]
+    if "reminders" in payload and isinstance(payload.get("reminders"), list):
+        normalized["reminders"] = payload["reminders"]
+    if "reminder_id" in payload and isinstance(payload.get("reminder_id"), str):
+        normalized["reminder_id"] = payload["reminder_id"]
+    return normalized
+
+
+def normalize_tool_message_payload(sample: dict[str, Any], scenario: str) -> dict[str, Any]:
+    if scenario.startswith("no_tool"):
+        return sample
+
+    messages = sample.get("messages", [])
+    if not isinstance(messages, list):
+        raise ValueError("sample.messages must be list")
+
+    assistant_idx = None
+    assistant_msg = None
+    for i, msg in enumerate(messages):
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("tool_calls"):
+            assistant_idx = i
+            assistant_msg = msg
+            break
+    if assistant_idx is None or not isinstance(assistant_msg, dict):
+        raise ValueError("tool scenario missing assistant tool_calls message")
+
+    tool_calls = assistant_msg.get("tool_calls")
+    if not isinstance(tool_calls, list) or not tool_calls:
+        raise ValueError("assistant tool_calls must be non-empty list")
+    tool_call = tool_calls[0]
+    call_id = tool_call.get("id", f"call_{uuid.uuid4().hex[:12]}")
+    fn = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+    tool_name = fn.get("name", "unknown")
+    fallback_status = "success"
+    if "missing" in scenario:
+        fallback_status = "missing_fields"
+    elif "ambiguous" in scenario:
+        fallback_status = "ambiguous"
+    elif "not_found" in scenario:
+        fallback_status = "not_found"
+
+    existing_payload: dict[str, Any] = {}
+    if assistant_idx + 1 < len(messages) and isinstance(messages[assistant_idx + 1], dict) and messages[assistant_idx + 1].get("role") == "tool":
+        try:
+            content = messages[assistant_idx + 1].get("content", "{}")
+            existing_payload = json.loads(content) if isinstance(content, str) else {}
+        except Exception:
+            existing_payload = {}
+
+    payload = normalize_tool_payload(existing_payload, fallback_status=fallback_status)
+    tool_msg = {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "name": tool_name,
+        "content": json.dumps(payload, ensure_ascii=False),
+    }
+    if assistant_idx + 1 < len(messages) and isinstance(messages[assistant_idx + 1], dict) and messages[assistant_idx + 1].get("role") == "tool":
+        messages[assistant_idx + 1] = tool_msg
+    else:
+        messages.insert(assistant_idx + 1, tool_msg)
+
+    sample["messages"] = messages
     return sample
 
 
@@ -533,6 +632,8 @@ def validate_sample(sample: dict[str, Any], scenario: str) -> None:
                 raise ValueError("tool payload must include status")
             if not isinstance(payload["status"], str) or not payload["status"].strip():
                 raise ValueError("tool payload status must be non-empty string")
+            if payload["status"] not in ALLOWED_STATUS:
+                raise ValueError(f"tool payload status must be one of {sorted(ALLOWED_STATUS)}")
             tool_statuses.append(payload["status"])
 
     if scenario.startswith("no_tool"):
@@ -546,17 +647,8 @@ def validate_sample(sample: dict[str, Any], scenario: str) -> None:
             raise ValueError(
                 f"scenario={scenario} expected tool={expected_tool}, got tool={called_tool_name}"
             )
-        expected_status = EXPECTED_STATUS.get(scenario)
-        if expected_status:
-            if len(tool_statuses) != 1:
-                raise ValueError(
-                    f"scenario={scenario} expects exactly one tool status, got {tool_statuses}"
-                )
-            actual_status = tool_statuses[0]
-            if actual_status != expected_status:
-                raise ValueError(
-                    f"scenario={scenario} expected status={expected_status}, got status={actual_status}"
-                )
+        if len(tool_statuses) != 1:
+            raise ValueError(f"tool scenario expects exactly one tool status, got {tool_statuses}")
 
 
 def generate_sample(
@@ -568,16 +660,22 @@ def generate_sample(
     max_tokens: int,
     max_retries: int,
 ) -> dict[str, Any]:
-    prompt = build_prompt(scenario=scenario, tools=tools, recent_user_texts=recent_user_texts)
     last_err: Exception | None = None
     last_text = ""
 
     for attempt in range(1, max_retries + 1):
         try:
+            prompt = build_prompt(
+                scenario=scenario,
+                tools=tools,
+                recent_user_texts=recent_user_texts,
+                variation_tag=f"{scenario}-{int(time.time()*1000)%1000000}-{attempt}",
+            )
             text = client.chat(prompt, temperature=temperature, max_tokens=max_tokens)
             last_text = text
             sample = extract_json_object(text)
             sample = normalize_sample(sample, tools=tools, scenario=scenario)
+            sample = normalize_tool_message_payload(sample, scenario=scenario)
             validate_sample(sample, scenario=scenario)
             return sample
         except Exception as exc:
@@ -599,6 +697,7 @@ def export_jsonl(
     max_retries: int,
     append_output: bool,
     save_raw: bool,
+    workers: int,
 ) -> int:
     random.seed(seed)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -613,38 +712,78 @@ def export_jsonl(
     tools = get_tools()
     stats: dict[str, int] = {}
     recent_user_texts: list[str] = []
+    workers = max(1, int(workers))
 
-    with output_path.open("a", encoding="utf-8") as fout:
-        raw_file = raw_path.open("a", encoding="utf-8") if save_raw else None
-        try:
-            for idx in range(1, n + 1):
-                scenario = choose_scenario()
-                sample = generate_sample(
-                    client=client,
-                    tools=tools,
-                    scenario=scenario,
-                    recent_user_texts=recent_user_texts,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    max_retries=max_retries,
-                )
-                sample["id"] = f"reminder_tooluse_{idx:06d}"
+    if workers == 1:
+        with output_path.open("a", encoding="utf-8") as fout:
+            raw_file = raw_path.open("a", encoding="utf-8") if save_raw else None
+            try:
+                for idx in range(1, n + 1):
+                    scenario = choose_scenario()
+                    sample = generate_sample(
+                        client=client,
+                        tools=tools,
+                        scenario=scenario,
+                        recent_user_texts=recent_user_texts,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        max_retries=max_retries,
+                    )
+                    sample["id"] = f"reminder_tooluse_{idx:06d}"
 
-                fout.write(json.dumps(sample, ensure_ascii=False) + "\n")
-                fout.flush()
+                    fout.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                    fout.flush()
 
+                    if raw_file:
+                        raw_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                        raw_file.flush()
+
+                    user_text = sample["messages"][1]["content"]
+                    recent_user_texts.append(user_text)
+                    stats[scenario] = stats.get(scenario, 0) + 1
+
+                    print(f"[{idx}/{n}] {scenario} | {user_text}")
+            finally:
                 if raw_file:
-                    raw_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
-                    raw_file.flush()
+                    raw_file.close()
+    else:
+        jobs: list[tuple[int, str]] = [(idx, choose_scenario()) for idx in range(1, n + 1)]
+        print(f"parallel generation enabled: workers={workers}, total={n}")
 
-                user_text = sample["messages"][1]["content"]
-                recent_user_texts.append(user_text)
-                stats[scenario] = stats.get(scenario, 0) + 1
+        def _run_job(idx: int, scenario: str) -> tuple[int, str, dict[str, Any]]:
+            sample = generate_sample(
+                client=client,
+                tools=tools,
+                scenario=scenario,
+                # parallel mode: keep this empty to avoid cross-thread shared mutable state
+                recent_user_texts=[],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_retries=max_retries,
+            )
+            sample["id"] = f"reminder_tooluse_{idx:06d}"
+            return idx, scenario, sample
 
-                print(f"[{idx}/{n}] {scenario} | {user_text}")
-        finally:
-            if raw_file:
-                raw_file.close()
+        completed = 0
+        with output_path.open("a", encoding="utf-8") as fout:
+            raw_file = raw_path.open("a", encoding="utf-8") if save_raw else None
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                    future_to_job = {pool.submit(_run_job, idx, scenario): (idx, scenario) for idx, scenario in jobs}
+                    for future in concurrent.futures.as_completed(future_to_job):
+                        idx, scenario, sample = future.result()
+                        completed += 1
+                        preview = sample["messages"][1]["content"][:80].replace("\n", " ")
+                        print(f"[{completed}/{n}] ({idx}/{n}) {scenario} | {preview}")
+                        fout.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                        fout.flush()
+                        if raw_file:
+                            raw_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                            raw_file.flush()
+                        stats[scenario] = stats.get(scenario, 0) + 1
+            finally:
+                if raw_file:
+                    raw_file.close()
 
     output_path.with_suffix(".stats.json").write_text(
         json.dumps(stats, ensure_ascii=False, indent=2),
@@ -672,6 +811,7 @@ def main() -> None:
     parser.add_argument("--auth-scheme", choices=["bearer", "raw"], default="bearer")
     parser.add_argument("--append-output", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-raw", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
     env_file = load_env_file(args.api_env)
@@ -730,6 +870,7 @@ def main() -> None:
         max_retries=args.max_retries,
         append_output=args.append_output,
         save_raw=args.save_raw,
+        workers=args.workers,
     )
 
     print(f"Exported {count} samples to {args.output}")

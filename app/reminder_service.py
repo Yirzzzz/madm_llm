@@ -107,12 +107,75 @@ class ReminderService:
             reminder=reminder.model_dump(),
         )
 
+    def _task_matches(self, query_task: str | None, reminder_task: str | None) -> bool:
+        if not query_task:
+            return True
+        if not reminder_task:
+            return False
+        q = query_task.strip().lower()
+        t = reminder_task.strip().lower()
+        if q == t or q in t or t in q:
+            return True
+
+        def normalize_tokens(text: str) -> list[str]:
+            toks = re.findall(r"[a-z0-9]+", text.lower())
+            out: list[str] = []
+            for tok in toks:
+                base = tok
+                if len(base) > 4 and base.endswith("ing"):
+                    base = base[:-3]
+                elif len(base) > 3 and base.endswith("ed"):
+                    base = base[:-2]
+                elif len(base) > 3 and base.endswith("s"):
+                    base = base[:-1]
+                out.append(base)
+            return out
+
+        q_tokens = normalize_tokens(q)
+        t_tokens = normalize_tokens(t)
+        if not q_tokens or not t_tokens:
+            return False
+        q_set = set(q_tokens)
+        t_set = set(t_tokens)
+
+        # Ignore very generic verbs/articles when deciding semantic match.
+        stop = {"play", "do", "go", "have", "take", "make", "the", "a", "an", "my"}
+        q_content = {x for x in q_set if x not in stop}
+        t_content = {x for x in t_set if x not in stop}
+
+        # If query has content tokens, require all of them to appear in reminder task.
+        if q_content:
+            return q_content.issubset(t_content)
+        # Fallback for very short generic tasks: require at least one token overlap.
+        return len(q_set & t_set) > 0
+
+    def _time_matches(self, query_time_text: str | None, reminder: dict[str, Any]) -> bool:
+        if not query_time_text:
+            return True
+
+        q = query_time_text.strip().lower()
+        rt = str(reminder.get("time_text", "")).strip().lower()
+        if q == rt or q in rt or rt in q:
+            return True
+
+        # Fallback: compare parsed day from query to reminder.scheduled_time day.
+        parsed_query = self._parse_time_text(query_time_text)
+        scheduled_raw = reminder.get("scheduled_time")
+        if not parsed_query or not isinstance(scheduled_raw, str):
+            return False
+        try:
+            query_dt = datetime.fromisoformat(parsed_query)
+            sched_dt = datetime.fromisoformat(scheduled_raw)
+        except ValueError:
+            return False
+        return query_dt.date() == sched_dt.date()
+
     def query_reminder(self, time_text: str | None = None, task: str | None = None, target: str = "self") -> dict[str, Any]:
         reminders = [r for r in self.storage.load() if r.get("status") == "active"]
         matches = [
             r for r in reminders
-            if (not time_text or r.get("time_text") == time_text)
-            and (not task or r.get("task") == task)
+            if self._time_matches(time_text, r)
+            and self._task_matches(task, r.get("task"))
             and r.get("target") == ("self" if target != "self" else target)
         ]
         if not matches:
@@ -125,8 +188,8 @@ class ReminderService:
             return [r for r in reminders if r.get("reminder_id") == reminder_id]
         return [
             r for r in reminders
-            if (not time_text or r.get("time_text") == time_text)
-            and (not task or r.get("task") == task)
+            if self._time_matches(time_text, r)
+            and self._task_matches(task, r.get("task"))
             and r.get("target") == ("self" if target != "self" else target)
         ]
 
