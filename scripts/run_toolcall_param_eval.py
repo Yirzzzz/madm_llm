@@ -56,6 +56,31 @@ def parse_tool_call_output(text: str) -> dict[str, Any] | None:
         msg["content"] = None
         return msg
 
+    qwen_xml = re.search(
+        r"<tool_call>\s*<function=([^>\s]+)>\s*(.*?)\s*</function>\s*</tool_call>",
+        text,
+        flags=re.S,
+    )
+    if qwen_xml:
+        name = qwen_xml.group(1).strip()
+        body = qwen_xml.group(2)
+        arguments = {
+            match.group(1).strip(): match.group(2).strip()
+            for match in re.finditer(r"<parameter=([^>\s]+)>\s*(.*?)\s*</parameter>", body, flags=re.S)
+        }
+        if name and arguments:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call_{uuid.uuid4().hex[:12]}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+                    }
+                ],
+            }
+
     m = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, flags=re.S)
     if not m:
         return None
@@ -89,9 +114,10 @@ def parse_tool_call_output(text: str) -> dict[str, Any] | None:
 class HFAssistant:
     def __init__(self, model_path: str, adapter_path: str | None = None, max_new_tokens: int = 256) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
-        if self.tokenizer.pad_token is None:
+        if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, device_map="auto")
+        self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
         if adapter_path:
             self.model = PeftModel.from_pretrained(self.model, adapter_path)
         self.max_new_tokens = max_new_tokens
@@ -100,12 +126,31 @@ class HFAssistant:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}]
         tools = get_tools()
         if hasattr(self.tokenizer, "apply_chat_template"):
-            prompt = self.tokenizer.apply_chat_template(messages, tools=tools, tokenize=False, add_generation_prompt=True)
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tools=tools,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            except TypeError:
+                prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tools=tools,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
         else:
             prompt = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         with torch.no_grad():
-            out = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False)
+            out = self.model.generate(
+                **inputs,
+                max_new_tokens=self.max_new_tokens,
+                do_sample=False,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
         text = self.tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
         return parse_tool_call_output(text), text
 
@@ -242,4 +287,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

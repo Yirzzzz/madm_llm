@@ -336,3 +336,128 @@ pytest -q tests/test_benchmark_eval.py
 ```
 
 Result: passed (`3 passed`).
+
+## Update (Qwen XML tool-call eval parser)
+
+Fixed `scripts/run_toolcall_param_eval.py` so parameter extraction recognizes both supported model output formats:
+
+- JSON tool-call tags:
+  `<tool_call>{"name":"create_reminder","arguments":{...}}</tool_call>`
+- Qwen XML tool-call tags:
+  `<tool_call><function=create_reminder><parameter=task>...</parameter></function></tool_call>`
+
+Also updated the evaluator generation path to:
+
+- pass `enable_thinking=False` to chat templates that support it
+- set `model.generation_config.pad_token_id`
+- pass `pad_token_id` explicitly to `generate()`
+
+Validation:
+
+```bash
+python -m pytest tests/test_toolcall_param_eval.py
+```
+
+Result: passed (`2 passed`). A separate `py_compile` check hit a Windows permission error writing `scripts/__pycache__`, while pytest successfully imported and exercised the changed script.
+
+## Update (Qwen XML tool-call support in chat web demo)
+
+Mirrored the Qwen XML tool-call parser into `scripts/chat_web_demo.py`, so the web demo now accepts model outputs such as:
+
+```xml
+<tool_call>
+<function=create_reminder>
+<parameter=time_text>tomorrow at 4:00</parameter>
+<parameter=task>play basketball</parameter>
+</function>
+</tool_call>
+```
+
+Also updated the web demo generation path to pass `enable_thinking=False` when supported and set/pass `pad_token_id` explicitly.
+
+Validation:
+
+```bash
+python -c "from scripts.chat_web_demo import parse_tool_call_output; ..."
+```
+
+Result: parser converted Qwen XML into a standard `tool_calls` message with `create_reminder` and expected arguments.
+
+## Update (chat web demo tool history rendering fix)
+
+Fixed a likely 500 error in `scripts/chat_web_demo.py` after a successful first tool call. The backend keeps parsed tool-call arguments as JSON strings for `ToolExecutor`, but Qwen chat templates expect historical assistant `tool_calls.function.arguments` to be mappings when rendering the second model turn.
+
+Added `messages_for_chat_template()` to build a render-only copy of messages that:
+
+- removes private `_raw_preview` fields
+- decodes JSON-string tool arguments into dicts for chat template rendering
+- leaves the original runtime messages unchanged for backend execution
+
+Also changed `/api/chat` to return JSON error payloads on exceptions, so the browser no longer fails with `Unexpected token 'I', "Internal S"... is not valid JSON`.
+
+Validation:
+
+```bash
+python -m pytest tests/test_toolcall_param_eval.py
+```
+
+Result: passed (`2 passed`). A direct import check confirmed `messages_for_chat_template()` converts string arguments to dict arguments.
+
+## Update (API few-shot tool-call parameter eval)
+
+Added `scripts/run_toolcall_param_eval_api.py` for OpenAI-compatible API evaluation of the four reminder tools:
+
+- reads API settings from CLI args, `configs/data/api_generation.env`, or YAML config
+- injects the canonical four tool descriptions from `app.tool_registry.get_tools()` directly into the prompt
+- adds four few-shot examples, one for each reminder tool
+- supports optional native `tools` payload via `--native-tools`
+- writes the same style of summary/detail JSON report as the local model parameter evaluator
+
+Added example config:
+
+```bash
+configs/eval/toolcall_param_api_eval.example.yaml
+```
+
+Example command:
+
+```bash
+python scripts/run_toolcall_param_eval_api.py --api-env configs/data/api_generation.env --cases-jsonl benchmark/toolcall_param_cases.jsonl --model YOUR_MODEL --max-samples 20 --report benchmark/reports/toolcall_param_eval_api.json
+```
+
+Validation:
+
+```bash
+python -m pytest tests/test_toolcall_param_eval_api.py tests/test_toolcall_param_eval.py
+python -m py_compile scripts/run_toolcall_param_eval_api.py
+python scripts/run_toolcall_param_eval_api.py --help
+```
+
+Result: passed (`5 passed`); compile and help checks succeeded.
+
+## Update (DeepSeek 7B LoRA train config)
+
+Added `configs/train/deepseek_llm_7b_lora.yaml` for training:
+
+```bash
+python scripts/train_adapter.py --config configs/train/deepseek_llm_7b_lora.yaml
+```
+
+The config points to:
+
+```text
+E:/root/autodl-tmp/deepseek-ai/deepseek-llm-7b-chat
+```
+
+It reuses `data/training_data2.train.jsonl` and `data/training_data2.val.jsonl`, writes adapters to `outputs/deepseek_llm_7b_lora`, and uses conservative 7B settings: LoRA, batch size 1, gradient accumulation 16, BF16, and gradient checkpointing.
+
+Validation:
+
+```bash
+python -c "import yaml; ..."
+Test-Path E:\root\autodl-tmp\deepseek-ai\deepseek-llm-7b-chat
+Test-Path data\training_data2.train.jsonl
+Test-Path data\training_data2.val.jsonl
+```
+
+Result: YAML parsed, model path exists, and train/val files exist. A direct `scripts.train_adapter` import check exceeded 60 seconds in the local Windows environment, so full training was not started.

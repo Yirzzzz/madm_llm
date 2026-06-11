@@ -146,7 +146,34 @@ def parse_tool_call_output(text: str) -> dict[str, Any] | None:
         msg["content"] = None
         return msg
 
-    # Format B: custom tag
+    # Format B: Qwen XML function-call tag
+    # <tool_call><function=query_reminder><parameter=task>...</parameter></function></tool_call>
+    qwen_xml = re.search(
+        r"<tool_call>\s*<function=([^>\s]+)>\s*(.*?)\s*</function>\s*</tool_call>",
+        text,
+        flags=re.S,
+    )
+    if qwen_xml:
+        name = qwen_xml.group(1).strip()
+        body = qwen_xml.group(2)
+        arguments = {
+            match.group(1).strip(): match.group(2).strip()
+            for match in re.finditer(r"<parameter=([^>\s]+)>\s*(.*?)\s*</parameter>", body, flags=re.S)
+        }
+        if name and arguments:
+            return {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call_{uuid.uuid4().hex[:12]}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+                    }
+                ],
+            }
+
+    # Format C: custom JSON tag
     # <tool_call>{"name":"query_reminder","arguments":{...}}</tool_call>
     m = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, flags=re.S)
     if not m:
@@ -178,34 +205,73 @@ def parse_tool_call_output(text: str) -> dict[str, Any] | None:
     }
 
 
+def messages_for_chat_template(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rendered: list[dict[str, Any]] = []
+    for message in messages:
+        msg = {k: v for k, v in message.items() if not k.startswith("_")}
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            msg["tool_calls"] = []
+            for tool_call in tool_calls:
+                tc = dict(tool_call)
+                fn = dict(tc.get("function") or {})
+                arguments = fn.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        decoded = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        decoded = {}
+                    fn["arguments"] = decoded if isinstance(decoded, dict) else {}
+                tc["function"] = fn
+                msg["tool_calls"].append(tc)
+        rendered.append(msg)
+    return rendered
+
+
 class HFAssistant:
     def __init__(self, model_path: str, adapter_path: str | None = None, max_new_tokens: int = 384) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
-        if self.tokenizer.pad_token is None:
+        if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, device_map="auto")
+        self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
         if adapter_path:
             self.model = PeftModel.from_pretrained(self.model, adapter_path)
         self.max_new_tokens = max_new_tokens
 
     def __call__(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
+        template_messages = messages_for_chat_template(messages)
         if hasattr(self.tokenizer, "apply_chat_template"):
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tools=tools,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    template_messages,
+                    tools=tools,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            except TypeError:
+                prompt = self.tokenizer.apply_chat_template(
+                    template_messages,
+                    tools=tools,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
         else:
             prompt = (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"TOOLS:\n{json.dumps(tools, ensure_ascii=False)}\n\n"
-                f"MESSAGES:\n{json.dumps(messages, ensure_ascii=False)}\n\n"
+                f"MESSAGES:\n{json.dumps(template_messages, ensure_ascii=False)}\n\n"
                 "Answer naturally. Use tool call only when needed."
             )
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         with torch.no_grad():
-            out = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False)
+            out = self.model.generate(
+                **inputs,
+                max_new_tokens=self.max_new_tokens,
+                do_sample=False,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
         txt = self.tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
         logger.info("model_called prompt_tokens=%s output_chars=%s", inputs["input_ids"].shape[1], len(txt))
         tc_msg = parse_tool_call_output(txt)
@@ -250,42 +316,54 @@ def build_app(model_path: str, adapter_path: str | None, storage_path: str, stat
 
     @app.post("/api/chat")
     def chat(req: RequestBody) -> JSONResponse:
-        logger.info("chat request session_id=%s user=%s", req.session_id, req.message)
-        history = [] if stateless else sessions.get(req.session_id, [])
-        tools = get_tools()
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": req.message}]
-        first_model_output = ""
-        tool_result = ""
+        try:
+            logger.info("chat request session_id=%s user=%s", req.session_id, req.message)
+            history = [] if stateless else sessions.get(req.session_id, [])
+            tools = get_tools()
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": req.message}]
+            first_model_output = ""
+            tool_result = ""
 
-        for _ in range(3):
-            assistant = model_callable(messages, tools)
-            if not first_model_output:
-                first_model_output = str(assistant.get("_raw_preview") or assistant.get("content") or "")
-            messages.append(assistant)
-            if not assistant.get("tool_calls"):
-                if not stateless:
-                    sessions[req.session_id] = messages[1:]
-                return JSONResponse(
-                    {
-                        "reply": assistant_text(assistant),
-                        "first_model_output": first_model_output,
-                        "tool_result": tool_result,
-                    }
-                )
-            tool_msgs = executor.execute_tool_calls(assistant)
-            for t in tool_msgs:
-                tool_result = t["content"]
-            messages.extend(tool_msgs)
+            for _ in range(3):
+                assistant = model_callable(messages, tools)
+                if not first_model_output:
+                    first_model_output = str(assistant.get("_raw_preview") or assistant.get("content") or "")
+                messages.append(assistant)
+                if not assistant.get("tool_calls"):
+                    if not stateless:
+                        sessions[req.session_id] = messages[1:]
+                    return JSONResponse(
+                        {
+                            "reply": assistant_text(assistant),
+                            "first_model_output": first_model_output,
+                            "tool_result": tool_result,
+                        }
+                    )
+                tool_msgs = executor.execute_tool_calls(assistant)
+                for t in tool_msgs:
+                    tool_result = t["content"]
+                messages.extend(tool_msgs)
 
-        if not stateless:
-            sessions[req.session_id] = messages[1:]
-        return JSONResponse(
-            {
-                "reply": "Stopped at max tool rounds.",
-                "first_model_output": first_model_output,
-                "tool_result": tool_result,
-            }
-        )
+            if not stateless:
+                sessions[req.session_id] = messages[1:]
+            return JSONResponse(
+                {
+                    "reply": "Stopped at max tool rounds.",
+                    "first_model_output": first_model_output,
+                    "tool_result": tool_result,
+                }
+            )
+        except Exception as exc:
+            logger.exception("chat request failed")
+            return JSONResponse(
+                {
+                    "reply": f"Backend error: {exc}",
+                    "first_model_output": "",
+                    "tool_result": "",
+                    "error": str(exc),
+                },
+                status_code=500,
+            )
 
     return app
 

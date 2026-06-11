@@ -2,8 +2,8 @@
   "summary": {
     "total": 342,
     "tool_call_accuracy": 0.8011695906432749,
-    "tool_name_accuracy_overall": 0.6608187134502924,
-    "args_json_rate_overall": 0.7017543859649122,
+    "tool_name_accuracy_overall": 0.7008187134502924,
+    "args_json_rate_overall": 0.7317543859649122,
     "arg_match_rate": 0.7593423019431988,
     "model_path": "E:/LLM/Qwen/Qwen2.5-3B-Instruct",
     "adapter_path": ".\\outputs\\qwen25_3b_lora\\checkpoint-6260\\"

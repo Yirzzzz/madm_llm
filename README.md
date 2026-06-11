@@ -48,6 +48,20 @@ python scripts/eval_tooluse_model.py --config configs/eval/qwen25_15b_tooluse_ev
 
 The report is written to the `output.report_file` configured in YAML.
 
+API few-shot tool-call parameter evaluation:
+
+```bash
+python scripts/run_toolcall_param_eval_api.py --api-env configs/data/api_generation.env --cases-jsonl benchmark/toolcall_param_cases.jsonl --max-samples 20 --report benchmark/reports/toolcall_param_eval_api.json
+```
+
+Or use the example YAML config:
+
+```bash
+python scripts/run_toolcall_param_eval_api.py --config configs/eval/toolcall_param_api_eval.example.yaml
+```
+
+The API endpoint should be OpenAI-compatible and provide `/chat/completions`. The script injects the four canonical reminder tools from `app.tool_registry` into the prompt and uses four few-shot examples by default. Add `--native-tools` when the provider supports OpenAI `tools` payloads.
+
 ##  4) web
 ```bash
 python scripts/chat_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path "outputs/qwen25_15b_dora/checkpoint-580" 
