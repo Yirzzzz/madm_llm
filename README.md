@@ -122,6 +122,13 @@ The API endpoint should be OpenAI-compatible and provide `/chat/completions`. Th
 python scripts/chat_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path "outputs/qwen25_15b_dora/checkpoint-580" 
 python scripts/chat_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path "outputs/qwen25_15b_dora/checkpoint-800" --stateless 
 
+
+Measure one-message device intent latency, including TTFT:
+
+```bash
+python scripts/measure_device_intent_latency.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path ".\outputs\qwen25_15b_device_intent_lora2\checkpoint-800" --message "Lock the door" --warmup 1 --runs 5
+```
+
 Device intent recognition web demo with a simulated GUI and print trace:
 
 ```bash

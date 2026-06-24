@@ -5,6 +5,7 @@ import json
 from scripts.device_intent_web_demo import (
     PrintOnlyDeviceExecutor,
     SimulatedDeviceExecutor,
+    build_app,
     build_training_prompt,
     parse_intent_output,
     reply_for_result,
@@ -151,3 +152,40 @@ def test_executor_locks_and_unlocks_door(capsys):
 
 def test_reply_for_parse_failure_uses_raw_output():
     assert reply_for_result("hello", None, None) == "hello"
+
+
+def test_api_response_includes_latency(monkeypatch):
+    from fastapi.testclient import TestClient
+    import scripts.device_intent_web_demo as demo
+
+    class FakeModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __call__(self, user_message):
+            return {
+                "text": '{"matched":true,"capability_id":4,"capability":"Door lock control","intent":"lock","slots":{"method":"remote"},"missing_slots":[],"confidence":0.95}',
+                "latency": {
+                    "latency_ms": 123.4,
+                    "ttft_ms": 12.3,
+                    "decode_after_first_ms": 100.0,
+                    "post_last_token_overhead_ms": 1.1,
+                    "input_tokens": 40,
+                    "output_tokens": 20,
+                    "streamed_token_events": 20,
+                    "tokens_per_second_total": 10.0,
+                    "tokens_per_second_decode_only": 20.0,
+                },
+            }
+
+    monkeypatch.setattr(demo, "DeviceIntentModel", FakeModel)
+    client = TestClient(build_app(model_path="fake", adapter_path=None))
+
+    response = client.post("/api/intent", json={"message": "Lock the door"})
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["latency"]["latency_ms"] == 123.4
+    assert data["latency"]["ttft_ms"] == 12.3
+    assert data["parsed_intent"]["intent"] == "lock"
+    assert data["postprocess_result"]["state"]["door_locked"] is True

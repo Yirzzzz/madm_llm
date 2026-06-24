@@ -739,3 +739,92 @@ python scripts/generate_device_intent_unlock_boost_dataset.py --offline --no-app
 ```
 
 Result: tests passed (`25 passed`), and the offline smoke run produced all-category data with `20` unlock, `20` lock, `10` door/lock contrast, and `50` other-intent rows out of `100`.
+
+## Update (single-message device intent latency script)
+
+Added a command-line latency measurement script for a single device intent model reply.
+
+New files:
+
+- `scripts/measure_device_intent_latency.py`
+
+Behavior:
+
+- Loads the same base model and LoRA adapter style as `scripts/device_intent_web_demo.py`.
+- Measures generation latency for one message after configurable warmup runs.
+- Reports average, p50, p95, min/max latency, output tokens, tokens/second, raw model output, and parsed intent.
+- Supports `--json` for machine-readable output.
+
+Run:
+
+```bash
+python scripts/measure_device_intent_latency.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path ".\outputs\qwen25_15b_device_intent_lora2\checkpoint-800" --message "Lock the door" --warmup 1 --runs 5
+```
+
+Validation:
+
+```bash
+python -m py_compile scripts/measure_device_intent_latency.py
+```
+
+## Update (TTFT latency measurement)
+
+Updated the single-message latency script to measure first-token latency.
+
+Changed files:
+
+- `scripts/measure_device_intent_latency.py`
+- `README.md`
+
+Behavior:
+
+- Adds a minimal token timing streamer around `model.generate`.
+- Reports `ttft_ms_*` metrics for time to first generated token.
+- Keeps total end-to-end latency and adds post-first-token decode speed as `tokens_per_second_avg_after_first`.
+
+Validation:
+
+```bash
+python -m py_compile scripts/measure_device_intent_latency.py
+```
+
+## Update (latency script check and decode-only metric)
+
+Reviewed `scripts/measure_device_intent_latency.py` after TTFT support.
+
+Behavior:
+
+- Confirmed the script compiles successfully.
+- TTFT is measured as first streamed generated token time minus `model.generate` start time.
+- Added `last_token_ms`, `decode_after_first_ms`, `decode_only_tokens_per_second`, and `post_last_token_overhead_ms` to distinguish pure token decode speed from total post-first latency.
+- Kept `streamed_token_events` so results can be compared with `output_tokens`; matching values indicate the streamer counted the generated tokens consistently.
+
+Validation:
+
+```bash
+python -m py_compile scripts/measure_device_intent_latency.py
+```
+
+## Update (web demo latency display)
+
+Updated the device intent web demo to display per-request model latency metrics in the browser.
+
+Changed files:
+
+- `scripts/device_intent_web_demo.py`
+- `tests/test_device_intent_web_demo.py`
+
+Behavior:
+
+- Adds a token timing streamer to the web demo model call.
+- API responses now include `latency` with total latency, TTFT, decode-after-first time, post-last-token overhead, input/output token counts, total tokens/s, and decode-only tokens/s.
+- The browser chat trace displays a `[latency]` block before raw model output.
+
+Validation:
+
+```bash
+python -m py_compile scripts/device_intent_web_demo.py
+pytest -q tests/test_device_intent_web_demo.py
+```
+
+Result: tests passed (`9 passed`).
