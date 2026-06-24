@@ -140,7 +140,7 @@ HTML = """
       <section class="chatPane">
         <div id="chat" class="chat"></div>
         <div class="bar">
-          <input id="inp" placeholder="Try: Set the volume to 60 / Unlock the door / Show unread SMS" />
+          <input id="inp" placeholder="Try: Set the volume to 60 / Unlock or lock the door / Show unread SMS" />
           <button id="send">Send</button>
         </div>
       </section>
@@ -383,6 +383,10 @@ class SimulatedDeviceExecutor:
         elif intent == "unlock":
             self.state["door_locked"] = False
             self.state["last_action"] = "Door unlocked."
+            changes.append("door_locked")
+        elif intent == "lock":
+            self.state["door_locked"] = True
+            self.state["last_action"] = "Door locked."
             changes.append("door_locked")
         elif intent == "end_or_reject_call":
             action = slots.get("action")

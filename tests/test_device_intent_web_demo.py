@@ -113,5 +113,41 @@ def test_executor_missing_slots_does_not_change_state(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_executor_locks_and_unlocks_door(capsys):
+    executor = SimulatedDeviceExecutor()
+
+    unlock_result = executor.execute(
+        {
+            "matched": True,
+            "capability_id": 4,
+            "capability": "Door lock control",
+            "intent": "unlock",
+            "slots": {"method": "remote"},
+            "missing_slots": [],
+            "confidence": 0.95,
+        }
+    )
+    capsys.readouterr()
+
+    lock_result = executor.execute(
+        {
+            "matched": True,
+            "capability_id": 4,
+            "capability": "Door lock control",
+            "intent": "lock",
+            "slots": {"method": "remote"},
+            "missing_slots": [],
+            "confidence": 0.95,
+        }
+    )
+    capsys.readouterr()
+
+    assert unlock_result["state"]["door_locked"] is False
+    assert unlock_result["changes"] == ["door_locked"]
+    assert lock_result["state"]["door_locked"] is True
+    assert lock_result["changes"] == ["door_locked"]
+    assert lock_result["state"]["last_action"] == "Door locked."
+
+
 def test_reply_for_parse_failure_uses_raw_output():
     assert reply_for_result("hello", None, None) == "hello"

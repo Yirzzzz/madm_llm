@@ -25,7 +25,7 @@ SYSTEM_PROMPT = "Extract device-control intent and slots. Return JSON only."
 INFERENCE_SYSTEM_PROMPT = (
     "You are a device-control intent classifier and slot extractor. Return JSON only. "
     "Supported capabilities are IDs 1..13: call property manager, call contact, answer incoming call, "
-    "unlock door, reject or hang up call, change wallpaper, toggle do not disturb, adjust volume, "
+    "control the door lock by unlocking or locking, reject or hang up call, change wallpaper, toggle do not disturb, adjust volume, "
     "adjust screen brightness, arm or disarm security, query alarm records, monitor control, and "
     "view notifications or SMS. If no supported capability matches, return matched=false with null "
     "capability_id, null capability, null intent, empty slots, empty missing_slots, and confidence 0.0. "
@@ -37,7 +37,7 @@ CAPABILITY_NAMES: dict[int, str] = {
     1: "Call property manager",
     2: "Call contact",
     3: "Answer incoming call",
-    4: "Unlock door",
+    4: "Door lock control",
     5: "Reject or hang up call",
     6: "Change wallpaper",
     7: "Toggle do not disturb",
@@ -646,6 +646,7 @@ def write_dataset_report(output_path: Path, report_path: Path) -> dict[str, Any]
     utterances = [row["messages"][1]["content"] for row in rows]
     matched_counter = Counter(str(item["matched"]) for item in labels)
     capability_counter = Counter(str(item["capability_id"]) for item in labels)
+    intent_counter = Counter(str(item.get("intent")) for item in labels)
     scenario_counter = Counter(str(row.get("scenario")) for row in rows)
     duplicate_utterances = {utterance: count for utterance, count in Counter(utterances).items() if count > 1}
     missing_slot_counter = Counter()
@@ -663,6 +664,7 @@ def write_dataset_report(output_path: Path, report_path: Path) -> dict[str, Any]
         "matched_false": negative,
         "negative_ratio": (negative / total) if total else 0.0,
         "capability_distribution": dict(sorted(capability_counter.items())),
+        "intent_distribution": dict(sorted(intent_counter.items())),
         "scenario_distribution": dict(sorted(scenario_counter.items())),
         "missing_slot_distribution": dict(sorted(missing_slot_counter.items())),
         "exact_duplicate_utterance_count": sum(duplicate_utterances.values()) - len(duplicate_utterances),

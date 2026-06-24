@@ -272,6 +272,15 @@
       "status": "done",
       "passes": true,
       "verification": "pytest -q tests/test_stat_device_intent_dataset.py && python -m py_compile scripts/stat_device_intent_dataset.py"
+    },
+    {
+      "id": "F022",
+      "name": "Add mixed device intent boost generator with higher door-lock weight",
+      "description": "Append mixed intent/slot training rows for all existing categories while over-sampling capability 4 with positive unlock/lock intents and small door/lock contrast negatives.",
+      "priority": "P1",
+      "status": "done",
+      "passes": true,
+      "verification": "pytest -q tests/test_device_intent.py tests/test_device_intent_web_demo.py tests/test_generate_device_intent_unlock_boost_dataset.py tests/test_generate_device_intent_dataset.py tests/test_export_device_intent_data.py tests/test_stat_device_intent_dataset.py && python scripts/generate_device_intent_unlock_boost_dataset.py --offline --no-append --output data/tmp_mixed_door_lock_boost.jsonl --report data/tmp_mixed_door_lock_boost.stats.json --samples 100 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2"
     }
   ],
   "milestones": [

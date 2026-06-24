@@ -10,6 +10,7 @@ DEVICE_CAPABILITIES: list[dict[str, Any]] = [
     {"id": 2, "intent": "call_contact", "name": "呼叫联系人", "description": "拨打家人、常用联系人、服务电话", "required_slots": ["contact"]},
     {"id": 3, "intent": "answer_call", "name": "接听来电", "description": "来电时语音接听", "required_slots": []},
     {"id": 4, "intent": "unlock", "name": "开锁", "description": "远程开锁，支持通话中开锁", "required_slots": []},
+    {"id": 4, "intent": "lock", "name": "锁门", "description": "远程锁门或上锁", "required_slots": []},
     {"id": 5, "intent": "end_or_reject_call", "name": "拒接/挂断", "description": "拒接来电或挂断通话", "required_slots": ["action"]},
     {"id": 6, "intent": "change_wallpaper", "name": "更换壁纸", "description": "更换屏幕壁纸，支持指定类型", "required_slots": ["wallpaper_type"]},
     {"id": 7, "intent": "set_dnd", "name": "切换勿扰模式", "description": "开启/关闭勿扰", "required_slots": ["enabled"]},
@@ -22,6 +23,7 @@ DEVICE_CAPABILITIES: list[dict[str, Any]] = [
 ]
 
 CAPABILITY_BY_INTENT = {item["intent"]: item for item in DEVICE_CAPABILITIES}
+CAPABILITY_BY_INTENT["lock"] = {**CAPABILITY_BY_INTENT["unlock"], "intent": "lock"}
 
 
 @dataclass(frozen=True)
@@ -65,11 +67,14 @@ def parse_device_command(text: str | None) -> IntentParse:
     if _has_any(normalized, ["挂断", "挂电话", "挂了", "结束通话"]):
         return IntentParse("end_or_reject_call", {"action": "hangup"}, 0.95)
 
-    if _has_any(normalized, ["开锁", "打开门锁", "远程开门", "开门"]):
+    if _has_any(normalized, ["开锁", "打开门锁", "门锁打开", "远程开门", "开门", "unlockthedoor", "openthedoor"]):
         slots = {"method": "remote"}
         if "通话" in normalized:
             slots["during_call"] = True
         return IntentParse("unlock", slots, 0.95)
+
+    if _has_any(normalized, ["锁门", "上锁", "关门锁", "门锁上", "锁上门", "把门锁上", "lockthedoor", "securethedoor"]):
+        return IntentParse("lock", {"method": "remote"}, 0.95)
 
     if "壁纸" in normalized:
         return IntentParse("change_wallpaper", _parse_wallpaper_slots(normalized), 0.9)
@@ -124,7 +129,7 @@ def build_device_intent_label(text: str) -> dict[str, Any]:
 
 
 def _normalize(text: str | None) -> str:
-    return (text or "").strip().replace(" ", "")
+    return (text or "").strip().replace(" ", "").lower()
 
 
 def _has_any(text: str, keywords: list[str]) -> bool:

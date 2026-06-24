@@ -7,7 +7,7 @@ data:
   system_key: "messages"
 
 output:
-  dir: "outputs/qwen25_15b_device_intent_lora"
+  dir: "outputs/qwen25_15b_device_intent_lora2"
 
 train:
   max_length: 200

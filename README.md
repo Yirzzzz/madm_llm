@@ -18,6 +18,20 @@ Generate a richer device intent dataset with the same pattern as the benchmark p
 python scripts/generate_device_intent_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language mixed --dedupe-retries 2
 ```
 
+If the door lock capability is weak, append a focused boost set without changing the 13 capability IDs:
+
+```bash
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2 --dedupe-retries 2
+```
+
+This script still generates all existing intent categories, but over-samples door-lock coverage. With `--door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2`, each 1000 added rows contain about `500` other-intent rows, `200` unlock rows, `200` lock rows, and `100` matched=false door/lock contrast rows. It keeps the same `device_intent_v2` assistant JSON format and keeps the capability IDs unchanged; `lock` is an intent under capability 4, not a new capability class.
+
+To automatically add enough rows to reach a final door-lock capability distribution, use:
+
+```bash
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --target-unlock-ratio 0.2 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2
+```
+
 `--samples` is the number of rows added by this run. The generator appends to `--output` by default; use `--no-append` to overwrite and rebuild the file. `--dedupe-retries 2` may make extra API calls when a generated utterance is duplicated. If one API item times out, that row falls back to a local template, records `generation_error`, and the rest of the dataset continues. Use `--user-language english`, `--user-language chinese`, or `--user-language mixed`; assistant JSON string values are always normalized English.
 
 The generator keeps non-intent negative examples near one fifth of the dataset. The default offline distribution is `238` matched device-control rows and `60` negative rows (`20.1%` negative). With `--samples 1000`, the expected distribution is `799` matched rows and `201` negative rows.
@@ -26,6 +40,7 @@ For local verification without an API:
 
 ```bash
 python scripts/generate_device_intent_dataset.py --offline --no-append --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json
+python scripts/generate_device_intent_unlock_boost_dataset.py --offline --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 100 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2
 pytest -q tests/test_generate_device_intent_dataset.py
 ```
 
@@ -151,3 +166,7 @@ python scripts/stat_device_intent_dataset.py --input data/device_intent_dataset.
 python scripts/train_adapter.py --config configs/train/qwen25_15b_lora_intent.yaml   
 
 python scripts/device_intent_web_demo.py --model-path "E:/LLM/Qwen/Qwen2.5-1.5B-Instruct" --adapter-path ".\outputs\qwen25_15b_device_intent_lora\checkpoint-1000\"
+
+
+新增：
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2 --dedupe-retries 2

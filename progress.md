@@ -627,3 +627,115 @@ Validation:
 ```bash
 Documentation-only change; no tests required.
 ```
+
+## Update (unlock-focused device intent boost data generator)
+
+Added a dedicated data generator to increase the distribution of door-unlock examples while keeping the existing 13 device intent categories unchanged.
+
+New files:
+
+- `scripts/generate_device_intent_unlock_boost_dataset.py`
+- `tests/test_generate_device_intent_unlock_boost_dataset.py`
+
+Changed files:
+
+- `README.md`
+- `feature.json`
+
+Behavior:
+
+- Appends mostly `capability_id=4`, `intent=unlock` samples to the existing `device_intent_v2` dataset.
+- Uses a different API prompt style from the original generator, focused on real intercom, visitor, courier, caregiver, family-entry, and elderly spoken scenarios.
+- Keeps the original assistant JSON shape and does not add a new `lock` intent because the current executor only implements unlocking.
+- Adds a small matched=false contrast set for unsupported lock-door requests and non-control door/lock mentions, controlled by `--contrast-ratio`.
+- Supports fixed `--samples` or automatic `--target-unlock-ratio` planning when appending to an existing dataset.
+
+Recommended use:
+
+```bash
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language english --contrast-ratio 0.1 --dedupe-retries 2
+python scripts/split_jsonl_dataset.py --input data/device_intent_dataset.jsonl --train-output data/device_intent_dataset.train.jsonl --val-output data/device_intent_dataset.val.jsonl --val-ratio 0.1 --seed 42 --no-stratify-by-scenario
+python scripts/train_adapter.py --config configs/train/qwen25_15b_lora_intent.yaml
+```
+
+Validation:
+
+```bash
+pytest -q tests/test_generate_device_intent_unlock_boost_dataset.py tests/test_generate_device_intent_dataset.py
+python scripts/generate_device_intent_unlock_boost_dataset.py --offline --no-append --output data/tmp_unlock_boost_smoke.jsonl --report data/tmp_unlock_boost_smoke.stats.json --samples 20 --user-language english --contrast-ratio 0.1
+python scripts/stat_device_intent_dataset.py --input data/tmp_unlock_boost_smoke.jsonl --format text
+```
+
+Result: tests passed (`9 passed`), and the offline smoke run produced `18/20` unlock rows with `10%` contrast negatives and no duplicate utterances.
+
+## Update (door lock intent support)
+
+Updated the door-lock boost path so lock-door requests are positive intent rows instead of contrast negatives.
+
+Changed files:
+
+- `app/device_intent.py`
+- `scripts/device_intent_web_demo.py`
+- `scripts/generate_device_intent_dataset.py`
+- `scripts/generate_device_intent_unlock_boost_dataset.py`
+- `scripts/export_device_intent_data.py`
+- `scripts/stat_device_intent_dataset.py`
+- `tests/test_device_intent.py`
+- `tests/test_device_intent_web_demo.py`
+- `tests/test_generate_device_intent_unlock_boost_dataset.py`
+- `README.md`
+- `feature.json`
+
+Behavior:
+
+- Keeps capability id `4` as the existing door-lock capability, so the capability count remains unchanged.
+- Adds `intent=lock` under capability id `4`, alongside existing `intent=unlock`.
+- Updates rule parsing so English `Lock the door` and `Unlock the door` map correctly despite `unlock` containing `lock`.
+- Updates the web demo executor so `unlock` sets `door_locked=false` and `lock` sets `door_locked=true`.
+- Updates the boost generator default mix to `60% unlock`, `30% lock`, and `10%` matched=false door/lock contrast examples.
+
+Recommended use:
+
+```bash
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language english --contrast-ratio 0.1 --lock-ratio 0.3 --dedupe-retries 2
+python scripts/split_jsonl_dataset.py --input data/device_intent_dataset.jsonl --train-output data/device_intent_dataset.train.jsonl --val-output data/device_intent_dataset.val.jsonl --val-ratio 0.1 --seed 42 --no-stratify-by-scenario
+python scripts/train_adapter.py --config configs/train/qwen25_15b_lora_intent.yaml
+```
+
+Validation:
+
+```bash
+pytest -q tests/test_device_intent.py tests/test_device_intent_web_demo.py tests/test_generate_device_intent_unlock_boost_dataset.py tests/test_generate_device_intent_dataset.py tests/test_export_device_intent_data.py tests/test_stat_device_intent_dataset.py
+python scripts/generate_device_intent_unlock_boost_dataset.py --offline --no-append --output data/tmp_door_lock_boost_smoke.jsonl --report data/tmp_door_lock_boost_smoke.stats.json --samples 20 --user-language english --contrast-ratio 0.1
+```
+
+Result: tests passed (`25 passed`), and the offline smoke run produced `12` unlock, `6` lock, and `2` contrast rows out of `20`.
+
+## Update (mixed full-intent door-lock weighted boost)
+
+Adjusted the boost generator so it still adds examples for all existing device intent categories while increasing the relative weight of door-lock control.
+
+Behavior:
+
+- Default mixed boost keeps all original categories in the dataset instead of generating only door-lock rows.
+- Recommended mix for each `1000` added rows is about `500` other-intent rows, `200` unlock rows, `200` lock rows, and `100` matched=false door/lock contrast rows.
+- `--door-lock-ratio` controls total door-lock related coverage, including contrast negatives.
+- `--lock-ratio` controls positive lock-door rows; door-lock positive remainder becomes unlock rows.
+- `--contrast-ratio` controls matched=false door/lock contrast rows.
+
+Recommended use:
+
+```bash
+python scripts/generate_device_intent_unlock_boost_dataset.py --api-env configs/data/api_generation.env --output data/device_intent_dataset.jsonl --report data/device_intent_dataset.stats.json --samples 1000 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2 --dedupe-retries 2
+python scripts/split_jsonl_dataset.py --input data/device_intent_dataset.jsonl --train-output data/device_intent_dataset.train.jsonl --val-output data/device_intent_dataset.val.jsonl --val-ratio 0.1 --seed 42 --no-stratify-by-scenario
+python scripts/train_adapter.py --config configs/train/qwen25_15b_lora_intent.yaml
+```
+
+Validation:
+
+```bash
+pytest -q tests/test_generate_device_intent_unlock_boost_dataset.py tests/test_generate_device_intent_dataset.py tests/test_device_intent.py tests/test_device_intent_web_demo.py tests/test_export_device_intent_data.py tests/test_stat_device_intent_dataset.py
+python scripts/generate_device_intent_unlock_boost_dataset.py --offline --no-append --output data/tmp_mixed_door_lock_boost.jsonl --report data/tmp_mixed_door_lock_boost.stats.json --samples 100 --user-language english --door-lock-ratio 0.5 --contrast-ratio 0.1 --lock-ratio 0.2
+```
+
+Result: tests passed (`25 passed`), and the offline smoke run produced all-category data with `20` unlock, `20` lock, `10` door/lock contrast, and `50` other-intent rows out of `100`.

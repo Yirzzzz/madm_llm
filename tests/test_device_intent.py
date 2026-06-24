@@ -50,3 +50,18 @@ def test_parse_no_device_intent():
     assert label["capability"] is None
     assert label["intent"] is None
     assert label["slots"] == {}
+
+
+def test_parse_door_lock_action_variants():
+    lock_label = build_device_intent_label("Lock the door")
+    unlock_label = build_device_intent_label("Unlock the door")
+
+    assert lock_label["capability_id"] == 4
+    assert lock_label["intent"] == "lock"
+    assert lock_label["slots"] == {"method": "remote"}
+    assert lock_label["missing_slots"] == []
+
+    assert unlock_label["capability_id"] == 4
+    assert unlock_label["intent"] == "unlock"
+    assert unlock_label["slots"] == {"method": "remote"}
+    assert unlock_label["missing_slots"] == []
